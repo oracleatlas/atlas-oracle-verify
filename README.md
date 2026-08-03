@@ -73,6 +73,12 @@ returns a table that looks complete. Names can't defeat a log query.
 - **Nothing here reads a balance or a token.** These scripts have no wallet
   concept and never will.
 
+## The project
+
+[oracleatlas.xyz](https://oracleatlas.xyz) is the live monitor these scripts
+check. [What it has found](https://github.com/oracleatlas), and
+[@OracleAtlas_bot](https://t.me/OracleAtlas_bot) for transition alerts.
+
 ## License
 
 MIT.
