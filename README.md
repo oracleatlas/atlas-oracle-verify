@@ -42,6 +42,13 @@ its start, end and duration. The finding is not that the feeds break. It is that
 they don't: the gaps begin on Friday and every single unfreeze lands at 00:00 UTC
 on Monday. Outages scatter. These don't.
 
+This is also how you audit [the record](https://oracleatlas.xyz/archive.html).
+Every weekend the site has on file gets a permanent page with a window on it —
+`/weekend/2026-08-03.html` and so on. Point `freeze.mjs` at any feed and the gaps
+it prints should line up with those windows. If a weekend on that list has no
+matching gap on the chain, the list is wrong and you found it without asking
+anyone.
+
 **`coverage.mjs`** — the headline. Enumerates the `AnswerUpdated` topic across a
 week of blocks, reads `description()` on every aggregator that published, and
 matches against the Robinhood stock tokens from the explorer.
@@ -72,11 +79,21 @@ returns a table that looks complete. Names can't defeat a log query.
   that is purely on-chain and therefore purely checkable.
 - **Nothing here reads a balance or a token.** These scripts have no wallet
   concept and never will.
+- **The archive is checkable one weekend at a time, not in bulk.** `freeze.mjs`
+  confirms that a claimed window really happened on a given feed. It does not
+  confirm that the archive lists every weekend it should — for that, the index
+  itself declares the gaps: a weekend nobody observed is published as *not
+  measured* rather than omitted, so the thing to audit is whether a row is
+  missing entirely, and the row set is every Monday in the range.
 
 ## The project
 
 [oracleatlas.xyz](https://oracleatlas.xyz) is the live monitor these scripts
-check. [What it has found](https://github.com/oracleatlas), and
+check, and [the record](https://oracleatlas.xyz/archive.html) is every weekend it
+has on file — including the ones nobody was watching, which stay on the list as
+*not measured* instead of disappearing from it.
+
+[What it has found](https://github.com/oracleatlas) ·
 [@OracleAtlas_bot](https://t.me/OracleAtlas_bot) for transition alerts.
 
 ## License
