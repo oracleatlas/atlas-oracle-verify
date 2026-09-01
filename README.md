@@ -11,7 +11,15 @@ node freeze.mjs   0x<feed>          # every long gap, dated
 node coverage.mjs                   # how many stock tokens have a live oracle
 ```
 
-Feed addresses are printed on the site next to each ticker.
+Every script takes a feed address. Get them all, ticker by ticker, from the
+same API the site is built on — no key, no install:
+
+```bash
+node -e 'fetch("https://oracleatlas.xyz/api/v1/feeds").then(r=>r.json()).then(d=>d.feeds.forEach(f=>console.log(f.ticker.padEnd(6),f.feed)))'
+```
+
+That list is the first link in the chain: from there every number on the site is
+two RPC calls you make yourself, against a node we do not control.
 
 ---
 
@@ -34,8 +42,19 @@ Run them against a claim you doubt. That is the intended use.
 **`cadence.mjs`** — samples 45 consecutive rounds and reports the median and
 maximum gap. The site quotes cadence rather than instantaneous age on purpose:
 an age is one photograph and is refutable in a sentence ("you sampled at a weird
-moment"), while a median over 45 rounds is a structural property of the feed. If
-the site and this script disagree, the site is wrong.
+moment"), while a median over 45 rounds is a structural property of the feed.
+
+**Expect the medians to differ slightly, and know why before you call it a
+contradiction.** This script samples the 45 rounds that exist the moment you run
+it. The site refreshes its cadence once a day — 45 rounds across every feed is
+~1,500 round reads — and publishes the timestamp of that measurement as
+`cadenceMeasuredAt` in `/api/v1/feeds`, next to the `generatedAt` of the page
+itself. On a feed that publishes twice a day the two windows are a round or two
+apart, which moves the median by a few percent and neither number is wrong.
+
+What must match exactly is the **max gap** and every row of `freeze.mjs`: those
+are specific events, not a rolling statistic, and they do not move. If those
+disagree, the site is wrong.
 
 **`freeze.mjs`** — walks a feed backwards and prints every gap over 24 hours with
 its start, end and duration. The finding is not that the feeds break. It is that
