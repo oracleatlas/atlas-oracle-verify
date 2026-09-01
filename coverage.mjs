@@ -111,7 +111,26 @@ async function stockTokens() {
   for (let page = 0; page < 30; page++) {
     const u = new URLSearchParams({ q: "Robinhood Token", ...(cursor ?? {}) });
     const res = await fetch(`${BLOCKSCOUT}/api/v2/search?${u}`, { headers: { accept: "application/json" } });
-    if (!res.ok) throw new Error(`blockscout HTTP ${res.status}`);
+    if (!res.ok) {
+      // Blockscout ha messo la sua API dietro una sfida anti-bot: verificato il
+      // 01/09/2026, 0 richieste su 12 passate, e ogni path sotto /api risponde
+      // 403 a un client che non sia un browser. Non e' un errore di questo
+      // script e non si aggira con uno user-agent — provato.
+      //
+      // Un messaggio che dice "HTTP 403" e basta manda chi legge a cercare un
+      // bug che non ha.
+      if (res.status === 403) {
+        throw new Error(
+          `blockscout returned 403 for ${BLOCKSCOUT}\n` +
+          `  The explorer's API is behind an anti-bot challenge, so this script cannot enumerate\n` +
+          `  the token list from it. This is the explorer's change, not a bug here.\n` +
+          `  cadence.mjs and freeze.mjs do not use the explorer and still work: they read the chain\n` +
+          `  directly, and they are the two that check the numbers the site actually publishes.\n` +
+          `  Point this at another Blockscout instance with RH_BLOCKSCOUT=<url> if you have one.`,
+        );
+      }
+      throw new Error(`blockscout HTTP ${res.status}`);
+    }
     const data = await res.json();
     const items = data.items ?? [];
     if (!items.length) break;

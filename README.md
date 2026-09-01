@@ -8,7 +8,7 @@ Zero dependencies. No API key. No install. Node 22+.
 ```bash
 node cadence.mjs  0x<feed>          # how often a feed actually publishes
 node freeze.mjs   0x<feed>          # every long gap, dated
-node coverage.mjs                   # how many stock tokens have a live oracle
+node coverage.mjs                   # how many stock tokens have a live oracle  [see note]
 ```
 
 Every script takes a feed address. Get them all, ticker by ticker, from the
@@ -20,6 +20,20 @@ node -e 'fetch("https://oracleatlas.xyz/api/v1/feeds").then(r=>r.json()).then(d=
 
 That list is the first link in the chain: from there every number on the site is
 two RPC calls you make yourself, against a node we do not control.
+
+> **Note, 1 Sep 2026 — `coverage.mjs` is currently blocked, and the other two are not.**
+> It is the only one of the three that asks a block explorer instead of the chain: it
+> enumerates the token list from Blockscout, and Blockscout has put its API behind an
+> anti-bot challenge. Measured that day: 0 of 12 requests got through, every `/api` path
+> returns 403, and a browser user-agent does not help.
+>
+> `cadence.mjs` and `freeze.mjs` are unaffected — they read the chain directly, and they
+> are the two that check the numbers the site puts on its front page. Pass
+> `RH_BLOCKSCOUT=<url>` to point `coverage.mjs` at another instance.
+>
+> The real fix is to stop asking an explorer at all. This project's own argument is that
+> names cannot be trusted to find things and a log query can — and the one script that
+> searches by name on a third party is the one that broke.
 
 ---
 
