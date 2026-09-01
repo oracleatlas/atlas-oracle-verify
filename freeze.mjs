@@ -72,7 +72,18 @@ function decodeString(raw) {
   return Buffer.from(hex.slice(128, 128 + len * 2), "hex").toString("utf8");
 }
 
-const fmt = (s) => `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
+// ⚠️ ARROTONDA al minuto, non tronca — e la differenza non e' estetica.
+//
+// Il sito pubblica 57h27m e questo script stampava 57h26m sugli stessi 206.816
+// secondi: uno arrotondava, l'altro troncava. Il README di questo repo dice
+// "If those disagree, the site is wrong", quindi la discrepanza accusava il
+// sito di un errore che non aveva — sulla riga che invita a controllarlo.
+// Trovato dall'audit del 01/09/2026; era noto internamente da settimane e mai
+// chiuso qui.
+const fmt = (s) => {
+  const m = Math.round(s / 60);
+  return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m`;
+};
 const stamp = (t) => new Date(t * 1000).toISOString().slice(0, 16).replace("T", " ");
 const DAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
