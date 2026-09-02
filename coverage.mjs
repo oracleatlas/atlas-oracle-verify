@@ -28,7 +28,33 @@ const BLOCKSCOUT = process.env.RH_BLOCKSCOUT ?? "https://robinhoodchain.blocksco
 // keccak256("AnswerUpdated(int256,uint256,uint256)")
 const TOPIC = "0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f";
 const SEL_DESC = "0x7284e416";
+// uiMultiplier() — an issuer-controlled function that exists on Robinhood's own
+// stock-token contracts and on nothing else. It is how this script stops
+// trusting a name. See the note above stockTokens().
+const SEL_UIMULT = "0xa60bf13d";
 const TOKEN_SUFFIX = "• Robinhood Token";
+
+// Blockscout answers 403 to a request with no User-Agent. This script shipped
+// without one for a day, and its own error message told you a User-Agent would
+// not help — which was wrong, and cost anyone who tried to check the headline
+// number.
+//
+// Measured on the same URL, 2 Sep 2026, negatives re-run afterwards to rule out
+// a passing mood on their side:
+//
+//     (no User-Agent)                                     403
+//     Mozilla/5.0                                         403
+//     curl's default                                      403
+//     Mozilla/5.0 (compatible)                            200
+//     Mozilla/5.0 (compatible; AtlasVerify/1.0; +repo)    200
+//     a real Chrome string                                200
+//
+// So it wants the ordinary shape, not a specific name. This declares what it is
+// and where to find it rather than impersonating a browser: if they decide to
+// block this script one day, they should be able to do it on purpose. Override
+// it with RH_USER_AGENT if you would rather announce yourself differently.
+const UA = process.env.RH_USER_AGENT ??
+  "Mozilla/5.0 (compatible; AtlasVerify/1.0; +https://github.com/oracleatlas/atlas-oracle-verify)";
 const BLOCKS_PER_DAY = Math.round(86_400_000 / 101); // ~101ms blocks
 
 const i = process.argv.indexOf("--days");
@@ -61,10 +87,20 @@ async function ethCall(calls) {
       jsonrpc: "2.0", id: k + n, method: "eth_call",
       params: [{ to: c.to, data: c.data }, "latest"],
     }));
-    const res = await fetch(RPC, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    if (!res.ok) throw new Error(`RPC HTTP ${res.status}`);
+    // Backoff on 429/5xx, like rpc() above. Without it this threw on the first
+    // rate limit — which it started doing the moment the token check added a few
+    // hundred calls to the front of the run. The endpoint is public and shared:
+    // the polite thing and the working thing are the same thing here.
+    let res = null;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      res = await fetch(RPC, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (res.ok) break;
+      if (res.status !== 429 && res.status < 500) throw new Error(`RPC HTTP ${res.status}`);
+      await sleep(600 * 2 ** attempt);
+    }
+    if (!res.ok) throw new Error(`RPC HTTP ${res.status} after retries`);
     for (const r of await res.json()) if (r.result && r.result !== "0x") out[r.id] = r.result;
-    await sleep(120);
+    await sleep(200);
   }
   return out;
 }
@@ -110,22 +146,21 @@ async function stockTokens() {
   let cursor = null, firstSeen = null;
   for (let page = 0; page < 30; page++) {
     const u = new URLSearchParams({ q: "Robinhood Token", ...(cursor ?? {}) });
-    const res = await fetch(`${BLOCKSCOUT}/api/v2/search?${u}`, { headers: { accept: "application/json" } });
+    const res = await fetch(`${BLOCKSCOUT}/api/v2/search?${u}`, {
+      headers: { accept: "application/json", "user-agent": UA },
+    });
     if (!res.ok) {
-      // Blockscout ha messo la sua API dietro una sfida anti-bot: verificato il
-      // 01/09/2026, 0 richieste su 12 passate, e ogni path sotto /api risponde
-      // 403 a un client che non sia un browser. Non e' un errore di questo
-      // script e non si aggira con uno user-agent — provato.
-      //
-      // Un messaggio che dice "HTTP 403" e basta manda chi legge a cercare un
-      // bug che non ha.
+      // A 403 HERE, with a User-Agent already sent, is a different fact from the
+      // one this script used to report — so the message says what was tried
+      // instead of telling you the door is closed.
       if (res.status === 403) {
         throw new Error(
           `blockscout returned 403 for ${BLOCKSCOUT}\n` +
-          `  The explorer's API is behind an anti-bot challenge, so this script cannot enumerate\n` +
-          `  the token list from it. This is the explorer's change, not a bug here.\n` +
-          `  cadence.mjs and freeze.mjs do not use the explorer and still work: they read the chain\n` +
-          `  directly, and they are the two that check the numbers the site actually publishes.\n` +
+          `  This request DID send a User-Agent (${UA}),\n` +
+          `  which was enough on 2 Sep 2026. So either they tightened it again, or this IP is\n` +
+          `  being rate limited. Try RH_USER_AGENT=<something else>, or wait and re-run.\n` +
+          `  cadence.mjs and freeze.mjs never touch the explorer and are unaffected: they read the\n` +
+          `  chain directly, and they are the two that check the numbers on the front page.\n` +
           `  Point this at another Blockscout instance with RH_BLOCKSCOUT=<url> if you have one.`,
         );
       }
@@ -141,12 +176,45 @@ async function stockTokens() {
       const name = String(it.name ?? "");
       if (it.type !== "token" || !name.includes(TOKEN_SUFFIX)) continue;
       const ticker = String(it.symbol ?? "").toUpperCase();
-      if (ticker && !out.has(ticker)) out.set(ticker, name.replace(TOKEN_SUFFIX, "").replace(/\s*•\s*$/, "").trim());
+      const addr = it.address ?? it.address_hash;
+      if (ticker && addr && !out.has(ticker)) {
+        out.set(ticker, { name: name.replace(TOKEN_SUFFIX, "").replace(/\s*•\s*$/, "").trim(), address: addr });
+      }
     }
     cursor = data.next_page_params ?? null;
     if (!cursor) break;
   }
-  return out;
+
+  // ── and now stop trusting the name ────────────────────────────────────────
+  //
+  // The suffix "• Robinhood Token" is a STRING IN A NAME. Anyone can mint a
+  // token that ends with it, and plenty have. Measured 2 Sep 2026: the
+  // explorer's own search returns 452 tickers carrying that suffix, and only
+  // 196 of them answer uiMultiplier() — the rest are wrappers (WAAPL, LPNVDA,
+  // AUTSLA) and jokes (HOODRAT, ANTICHRIST, SHIT) wearing the name.
+  //
+  // So a script that counted the name would report 452 tokenized stocks on a
+  // chain that has 196, and would print a table that looks complete. That is
+  // the same failure this script already refuses on the FEED side — where
+  // discovery enumerates a log topic and only reads descriptions to label. This
+  // is that rule finally applied to the token side too: the explorer proposes,
+  // the chain decides.
+  const rows = [...out.entries()];
+  const answered = await ethCall(rows.map(([, v]) => ({ to: v.address, data: SEL_UIMULT })));
+  const confirmed = new Map();
+  for (let n = 0; n < rows.length; n++) {
+    if (answered[n]) confirmed.set(rows[n][0], rows[n][1].name);
+  }
+  process.stderr.write(
+    `  ${out.size} carry the name, ${confirmed.size} answer uiMultiplier() and are real\n`,
+  );
+  if (!confirmed.size) {
+    throw new Error(
+      "no token answered uiMultiplier(). Either the RPC is lying to us or the interface changed —\n" +
+      "  either way this is a 'do not know', not a chain with zero tokenized stocks.",
+    );
+  }
+  return confirmed;
 }
 
 // Every ticker a description could denote, with the convention that produced it.

@@ -21,19 +21,21 @@ node -e 'fetch("https://oracleatlas.xyz/api/v1/feeds").then(r=>r.json()).then(d=
 That list is the first link in the chain: from there every number on the site is
 two RPC calls you make yourself, against a node we do not control.
 
-> **Note, 1 Sep 2026 — `coverage.mjs` is currently blocked, and the other two are not.**
-> It is the only one of the three that asks a block explorer instead of the chain: it
-> enumerates the token list from Blockscout, and Blockscout has put its API behind an
-> anti-bot challenge. Measured that day: 0 of 12 requests got through, every `/api` path
-> returns 403, and a browser user-agent does not help.
+> **Note, 2 Sep 2026 — `coverage.mjs` was broken for a day, and the fix changed what it counts.**
+> It asked Blockscout without a `User-Agent`, got 403, and its own error message told you a
+> `User-Agent` would not help. That was wrong. Measured on the same URL, with the negative
+> cases re-run afterwards to rule out a passing mood on their side: no `User-Agent` → 403,
+> bare `Mozilla/5.0` → 403, `curl`'s default → 403, `Mozilla/5.0 (compatible; …)` → 200.
+> It wants the ordinary shape, not a particular name. This script now sends one that says
+> what it is and where to find it; override with `RH_USER_AGENT`.
 >
-> `cadence.mjs` and `freeze.mjs` are unaffected — they read the chain directly, and they
-> are the two that check the numbers the site puts on its front page. Pass
-> `RH_BLOCKSCOUT=<url>` to point `coverage.mjs` at another instance.
->
-> The real fix is to stop asking an explorer at all. This project's own argument is that
-> names cannot be trusted to find things and a log query can — and the one script that
-> searches by name on a third party is the one that broke.
+> **The more useful half of the fix:** the suffix `• Robinhood Token` is a string in a name,
+> and anyone can mint a token that ends with it. The explorer returns **452** tickers
+> carrying it; only **196** answer `uiMultiplier()`, an issuer function that exists on
+> Robinhood's own stock-token contracts and nowhere else. The other 256 are wrappers
+> (`WAAPL`, `LPNVDA`) and jokes (`HOODRAT`, `ANTICHRIST`) wearing the name. So this script
+> now lets the explorer *propose* and the chain *decide* — which is what it already did on
+> the feed side, and should always have done here.
 
 ---
 
@@ -84,7 +86,9 @@ anyone.
 
 **`coverage.mjs`** — the headline. Enumerates the `AnswerUpdated` topic across a
 week of blocks, reads `description()` on every aggregator that published, and
-matches against the Robinhood stock tokens from the explorer.
+matches against the Robinhood stock tokens — which it takes from the explorer as
+*candidates* and then confirms on-chain with `uiMultiplier()`, so a token that
+merely carries the name in its name does not get counted.
 
 It never uses a name to *find* a feed, only to label one, and that is the part
 worth checking. Three description conventions coexist on this chain for the same
